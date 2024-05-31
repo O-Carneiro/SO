@@ -1,0 +1,19 @@
+Para compilar:
+> make
+//Dois executáveis serão gerados: ep1 e newsh.
+
+Para rodar:
+
+1- rodar newsh e ep1 no shell do seu sistema:
+newsh:
+>./newsh
+ep1:
+>./ep1 <escalonador> <path/to/trace/> <path/to/ouput> 
+
+2- rodar ep1 no newsh
+>./newsh
+--sem parar a execucao do newsh--
+>./ep1 <escalonador> <path/to/trace/> <path/to/ouput> 
+
+OBS: Adicionei um "exit" pro newsh caso nao goste de ficar usando
+^C para cortar a execucao
