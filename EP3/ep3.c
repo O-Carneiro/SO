@@ -1,66 +1,71 @@
 #include "ep3.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 //TODOS:
 //-> o arquivo deve ser escrito só quando desmontar o FS.
 //
 //GLOBAIS
 int mountedFS = FALSE;
 FILE *FSFile;
-Dir *ROOT = NULL;
-//Construtores
-Dir *Dir_new(char *name){
-    Dir *ret = malloc(sizeof(Dir));
-    strcpy(ret->meta.name, name);
-    ret->size = 16;
-    ret->children = malloc(sizeof(Entry *) * 16);
-    time_t now = time(NULL);
-    struct tm* ts = localtime(&now);
-    ret->meta.created = ts;
-    ret->meta.lastAccessed = ts;
-    ret->meta.lastModified = ts;
-    
-    return ret;
-}
+bool BMP[BLOCK_NUMBER] = {false};
 //FUNCOES MISC
-int findChild(Dir *parent, char *dirName, char *caller,int mode){
-    //acha por busca binária o diretório na lista
-    printf("%s: %s: não existe tal arquivo ou diretório.\n",caller, dirName);
-    printf("%s: %s: não é um diretório.\n",caller, dirName);
-    printf("%s: %s: não é um arquivo.\n",caller, dirName);
-    return 0;
+void loadBMP(char *path){
+    uint8_t BMPBytes[3200];
+    fread(BMPBytes, sizeof(uint8_t), 3200, FSFile);
+    for(int i = 0; i < BITMAP_BYTES; i++){
+        uint8_t n = 128; //10000000
+        for(int j = 0; j < 8; j++){
+           if(BMPBytes[i] & n >> j)
+               BMP[i*8 + j] = true;
+        }
+    }
+    for(int i = 0; i < 50; i++){
+        printf("%d ", BMP[i]);
+        if(i % 24 == 0)
+            printf("\n");
+    }
+    printf("\n");
+    fclose(FSFile);
 }
+
+void loadFAT(){
+
+}
+
+void montaFromScratch(char *fileName){
+    //Escreve o bitmap no primeiro bloco,
+    // contando que a fat vai ocupar 13 blocos,
+    // e depois, o bloco que contém o root.
+    uint8_t *data = malloc(sizeof(uint8_t) * DISK_BYTES);
+    data[0] = 0xFF; //11111111
+    data[1] = 0xFE; //11111110
+    fwrite(data, sizeof(uint8_t), DISK_BYTES, FSFile);
+    free(data);
+    uint8_t byte[2];
+    fread(byte, sizeof(uint8_t), 1, FSFile);
+    printf("byte read: %d", byte[0]);
+    // fclose(FSFile);
+    // // FSFile = fopen(fileName, "wb+");
+    // loadBMP(fileName);
+    loadFAT();
+}
+
+
 //COMANDOS DO FS
 void criadir(char *dirName){
-    //Considera criação do ROOT
-    if(strcmp(dirName, "/") == 0 && ROOT == NULL){
-        ROOT = Dir_new(dirName);
-    }
-    else {
-        printf("Nome de diretório não pode ser root (\"\\\")");
-    }
-    //Caso geral
-    Dir *parent = ROOT;
-    char *next = strtok(dirName, "/");
-    while(next != NULL){
-        int childIndex = findChild(parent, next, "criadir", MODE_DIR);
-        if(childIndex < 0){
-            return;
-        }
-        else {
-            parent = parent->children[childIndex]->dir; 
-            next = strtok(NULL,"/");
-        }
-
-    }
-
 
 }
 void monta(char *path){
-    //todo: buscar arquivo no fs real
-    //se não achou no fs real:
-        mountedFS = TRUE;
-        criadir("/");
+    FSFile = fopen(path, "rb+");
+    if(FSFile == NULL){
+        FSFile = fopen(path, "wb+");
+        montaFromScratch(path);
+    }
+    else {
+        return;
+    }
 }
 
 //PROMPT E LEITURA DO PROMPT
@@ -75,11 +80,12 @@ int handleCommand(char *command){
         monta(strtok(NULL, " "));
     }
     else if(strcmp(token, "criadir") == 0){
-        criadir(strtok(NULL, " "));
+        // criadir(strtok(NULL, " "));
     }
     free(command);
     return 0;
 }
+
 
 int main(){
     while(TRUE){
@@ -88,6 +94,7 @@ int main(){
             break;
         handleCommand(command);
     }
+    // fclose(FSFile);
 
     return 0;
 }
