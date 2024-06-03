@@ -7,7 +7,7 @@ clean:
 	rm -rf *.out ep3 a b
 
 ep2: ep3.c ep3.h
-	${cc} $@.c ${CFLAGS} -o $@
+	${cc} $@.c ${CFLAGS} -o $@.out
 
 
 
