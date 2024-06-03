@@ -2,9 +2,9 @@ cc := gcc
 CFLAGS := -O3 -Wall -lreadline
 
 
-all: ep3
+all: clean ep3
 clean:
-	rm -rf *.out ep2
+	rm -rf *.out ep3 a b
 
 ep2: ep3.c ep3.h
 	${cc} $@.c ${CFLAGS} -o $@
