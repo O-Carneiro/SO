@@ -13,8 +13,8 @@
 #define DISK_BYTES 104857600
 #define DISK_HEX_VALUES 52428800
 #define BITMAP_BYTES 3200
-#define ROOT_ADDR 57344 
-#define ROOT_BLOCK 14 
+#define ROOT_ADDR 53248
+#define ROOT_BLOCK 13
 #define DIR_INDICATOR 32768
 #define LAST_BLOCK 32768
 #define LAST(k,n) ((k) & ((1<<(n))-1))
@@ -25,6 +25,9 @@
 #define NO_ALLOC false
 #define STOP_BEFORE true
 #define STOP_AT false
+#define INITIAL_FREE_SPACE 104800256 // 25600 - 14 blocos livres
+#define INITIAL_WASTED_SPACE 6144
+//espaço desperdiçado no fim da FAT(que tem os metadados no fim) e pelo ROOT vazio
 
     
 typedef struct Entry {

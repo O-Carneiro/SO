@@ -8,21 +8,14 @@
 //TODOS:
 //GLOBAIS
 int mountedFS = FALSE;
+uint32_t dirNumber = 0;
+uint32_t fileNumber = 0;
+uint32_t freeSpace = 0;
+uint32_t wastedSpace = 0;
 FILE *FSFile;
 uint8_t *BMP;
 uint16_t *FAT;
 //FUNCOES MISC
-void loadBMP(){
-    for(int i = 0; i < BITMAP_BYTES; i++){
-        uint8_t byte;
-        (void)!fread(&byte, sizeof(uint8_t), 1, FSFile);
-        BMP[i] = byte;
-    }
-}
-
-void loadFAT(){
-}
-
 void setBMP(uint8_t index, bool b){
     uint8_t i = index/8;
     if(b)
@@ -31,9 +24,22 @@ void setBMP(uint8_t index, bool b){
         BMP[i] = BMP[i] & (0xFF - (128 >> index%8));
 }
 
+void load(){
+    fread(FAT, sizeof(uint16_t), BLOCK_NUMBER, FSFile);
+    fread(&dirNumber, sizeof(uint32_t), 1, FSFile);
+    fread(&fileNumber, sizeof(uint32_t), 1, FSFile);
+    fread(&freeSpace, sizeof(uint32_t), 1, FSFile);
+    fread(&wastedSpace, sizeof(uint32_t), 1, FSFile);
+    for(int i = 0; i < BLOCK_NUMBER; i++){
+        if(FAT[i] != 0)
+            setBMP(i, true);
+    }
+}
+
+
 void createMountableFile(){
     //Escreve o bitmap no primeiro bloco,
-    // contando que a fat vai ocupar 13 blocos,
+    // contando Oue a fat vai ocupar 13 blocos,
     // e depois, o bloco que contém o root.
     uint8_t *data = calloc(DISK_BYTES, sizeof(uint8_t));
     fwrite(data, sizeof(uint8_t), DISK_BYTES, FSFile);
@@ -41,22 +47,34 @@ void createMountableFile(){
     rewind(FSFile);
     //Carrega bitmap inicial
     BMP[0] = 0xFF;
-    BMP[1] = 0xFE;
+    BMP[1] = 0xFC;
     //carrega FAT inicial
-    FAT[0] = LAST_BLOCK;
-    for(int i = 1; i < 13; i++){
+    for(int i = 0; i < 12; i++){
         FAT[i] = i+1;
     }
+    FAT[12] = LAST_BLOCK;
     FAT[13] = LAST_BLOCK;
-    FAT[14] = LAST_BLOCK;
+    freeSpace = INITIAL_FREE_SPACE;
+    wastedSpace = INITIAL_WASTED_SPACE;
+}
+void freeBlock(uint16_t block){
+    wastedSpace -= BLOCK_SIZE;
+    freeSpace += BLOCK_SIZE;
+    FAT[block] = 0;
+    setBMP(block, false);
+}
+void takeBlock(uint16_t block){
+    wastedSpace += BLOCK_SIZE;
+    freeSpace -= BLOCK_SIZE;
+    FAT[block] = LAST_BLOCK;
+    setBMP(block, true);
 }
 uint16_t findFreeBlock(){
     for(int i = 0; i < BLOCK_NUMBER; i++){
         for(int j = 0; j < 8; j++){
             if(!(BMP[i] & 128 >> j)){
                 uint16_t ret = (i*8) + j;
-                FAT[ret] = LAST_BLOCK;
-                setBMP(ret, true);
+                takeBlock(ret);
                 return ret;
             }
         }
@@ -65,6 +83,7 @@ uint16_t findFreeBlock(){
     printf("DISCO CHEIO, impossível continuar.");
     exit(0);
 }
+
 
 Entry readEntry(){
     Entry ret;
@@ -90,9 +109,72 @@ int nextBlock(uint16_t curBlock, bool mode){
         return curBlock;
     }
 }
+void showFileTreeR(char *path, uint16_t level){
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
+    Entry e;
+    uint32_t lastPos;
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock)
+            return;
 
+        e = readEntry(); 
+        bool ehdir = e.blockPtr & DIR_INDICATOR;
+
+        if(e.blockPtr == 0){
+            return;
+        }
+
+        for(int i = 0; i < level; i++){
+            if(i == level -1) printf("  |-- ");
+            else if(i == 0) printf("|");
+            else printf("  |");
+        }
+        if(ehdir) printf("%s/\n", e.name);
+        else printf("%s\n", e.name);
+        if(ehdir){
+            lastPos = ftell(FSFile);
+            fseek(FSFile, (e.blockPtr - DIR_INDICATOR) * BLOCK_SIZE, SEEK_SET);
+            showFileTreeR(path, level + 1);
+            fseek(FSFile, lastPos, SEEK_SET);
+        }
+    }
+}
+
+void showFileTree(char *path, uint16_t level){
+    fseek(FSFile, ROOT_ADDR, SEEK_SET);
+    uint16_t curBlock = ROOT_BLOCK;
+    Entry e;
+    uint32_t lastPos;
+    printf("/\n");
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock)
+            return;
+        e = readEntry(); 
+        bool ehdir = e.blockPtr & DIR_INDICATOR;
+
+        if(e.blockPtr == 0){
+            return;
+        }
+        for(int i = 0; i < level; i++){
+            if(i == level -1) printf("|-- ");
+            else printf("  |");
+        }
+        if(ehdir) printf("%s/\n", e.name);
+        else printf("%s\n", e.name);
+        if(ehdir){
+            lastPos = ftell(FSFile);
+            fseek(FSFile, (e.blockPtr - DIR_INDICATOR) * BLOCK_SIZE, SEEK_SET);
+            showFileTreeR(path, level + 1);
+            fseek(FSFile, lastPos, SEEK_SET);
+        }
+    }
+}
 void findEntrySpace(){
-    uint16_t curBlock = ftell(FSFile)/4096;
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     while(true){
         if(ftell(FSFile)/BLOCK_SIZE != curBlock)
@@ -127,6 +209,7 @@ bool entryExists(char *fileName){
     }
 }
 void writeEntry(char *entryName, uint32_t size, uint8_t ehDir){
+    wastedSpace -= ENTRY_SIZE;
     findEntrySpace();
     int stringLen = strlen(entryName);
     if(stringLen > 234){
@@ -207,9 +290,10 @@ void printTime(uint32_t now){
 }
 
 void compacta(){
+    wastedSpace += ENTRY_SIZE;
     uint32_t eraseAddr = ftell(FSFile) - ENTRY_SIZE;
     uint32_t lastAddr;
-    uint16_t curBlock = ftell(FSFile)/4096;
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     char zeroes[ENTRY_SIZE] = {'\0'};
     Entry prev, e;
     e = readEntry();
@@ -230,8 +314,7 @@ void compacta(){
     }
     if((lastAddr % BLOCK_SIZE) == 0 && lastAddr != ROOT_ADDR){
         uint16_t emptyBlock = lastAddr/BLOCK_SIZE;
-        FAT[emptyBlock] = 0;
-        setBMP(emptyBlock, false);
+        freeBlock(emptyBlock);
         uint16_t lastBeforeEmpty = eraseAddr/BLOCK_SIZE;
         //Equanto o lastBeforeEmpty apontar para uma entrada valida
         while(FAT[FAT[lastBeforeEmpty]] != 0){
@@ -248,17 +331,23 @@ void compacta(){
 
 //COMANDOS DO FS
 void monta(char *path){
+    mountedFS = true;
+    BMP = calloc(BITMAP_BYTES, sizeof(uint8_t));
+    FAT = malloc(BLOCK_NUMBER * sizeof(uint16_t));
     FSFile = fopen(path, "rb+");
     if(FSFile == NULL){
         FSFile = fopen(path, "wb+");
         createMountableFile();
     }
     else {
+        load();
+        showFileTree("/", 1);
         return;
     }
 }
 
 void criadir(char *dirName){
+    dirNumber++;
     char *dest = NULL;
     pathTo(dirName, &dest, STOP_BEFORE,DIR);
     if(ftell(FSFile) == 0) return;
@@ -266,6 +355,7 @@ void criadir(char *dirName){
 }
 
 void toca(char *fileName, uint32_t size){
+    fileNumber++;
     char *dest = NULL;
     pathTo(fileName, &dest, STOP_BEFORE, DIR);
     if(ftell(FSFile) == 0) return;
@@ -321,7 +411,7 @@ void copia(char *origem){
     while(curBlock != 0){
         i = 0;
         char *writeBuf = calloc(BLOCK_SIZE, sizeof(uint8_t));
-        while(written < length && i < 4096){
+        while(written < length && i < BLOCK_SIZE){
             writeBuf[i++] = buffer[written++];
         }
         fwrite(writeBuf, 1, BLOCK_SIZE, FSFile);
@@ -332,6 +422,7 @@ void copia(char *origem){
         else
             break;
     }
+    wastedSpace -= written;
     free(buffer);
 }
 
@@ -388,9 +479,11 @@ void apaga(char *fileName){
     pathTo(path, &parent, STOP_BEFORE, DIR);
     //err arq no exist
     if(!entryExists(parent)) return;
+    fileNumber--;
 
     uint16_t i = 0, curBlock;
     Entry e = readEntry();
+    wastedSpace += e.size;
     if(e.blockPtr & DIR_INDICATOR) return;
     curBlock = e.blockPtr;
     compacta();
@@ -402,8 +495,7 @@ void apaga(char *fileName){
     for(int j = 0; j < i; j++){
         fseek(FSFile, blocks[j]*BLOCK_SIZE, SEEK_SET);
         fwrite(eraseBuf, 1, BLOCK_SIZE, FSFile);
-        FAT[blocks[j]] = 0;
-        setBMP(blocks[j], false);
+        freeBlock(blocks[j]);
     }
     free(eraseBuf);
 }
@@ -413,18 +505,19 @@ void apagadir(char *dirName){
     while(dirName[i] != '\0'){
         i++;
     }
-    if(dirName[i] != '/'){
+    if(dirName[i-1] != '/'){
         strcat(dirName, "/\0");
     }
     char *parent;
-    char path[4096]; strcpy(path, dirName);
+    char path[BLOCK_SIZE]; strcpy(path, dirName);
     pathTo(path, &parent, STOP_BEFORE, DIR);
     if(!entryExists(parent)){printf("Entry %s does not exist\n", path);return;}
+    dirNumber--;
     uint32_t eraseAddr = ftell(FSFile)+ENTRY_SIZE;
     strcpy(path, dirName);
     pathTo(path, &parent, STOP_AT, DIR);
     if(ftell(FSFile) == 0) return;
-    uint16_t curBlock = ftell(FSFile)/4096;
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     i = 0;
     uint32_t lastPos;
@@ -453,9 +546,26 @@ void apagadir(char *dirName){
     char *eraseBuf = calloc(BLOCK_SIZE, sizeof(uint8_t));
     fseek(FSFile, curBlock*BLOCK_SIZE, SEEK_SET);
     fwrite(eraseBuf, 1, BLOCK_SIZE, FSFile);
-    FAT[curBlock] = 0;
-    setBMP(curBlock, false);
+    freeBlock(curBlock);
     free(eraseBuf);
+}
+
+void status(){
+    printf("%d diretorio(s), %d arquivo(s), %d B livres, %d B desperiçados\n",
+           dirNumber, fileNumber, freeSpace, wastedSpace);
+}
+
+void desmonta(char *file){
+    rewind(FSFile);
+    fwrite(FAT, sizeof(uint16_t), BLOCK_NUMBER, FSFile);
+    fwrite(&dirNumber, sizeof(uint32_t), 1, FSFile);
+    fwrite(&fileNumber, sizeof(uint32_t), 1, FSFile);
+    fwrite(&freeSpace, sizeof(uint32_t), 1, FSFile);
+    fwrite(&wastedSpace, sizeof(uint32_t), 1, FSFile);
+    fclose(FSFile);
+    free(BMP);
+    free(FAT);
+    mountedFS= false;
 }
 //PROMPT E LEITURA DO PROMPT 
 char *promptUser(){
@@ -466,16 +576,22 @@ char *promptUser(){
 int handleCommand(char *command){
     char *token = strtok(command, " ");
     if(strcmp(token, "monta") == 0)monta(strtok(NULL, " "));
-    else if(strcmp(token, "criadir") == 0)criadir(strtok(NULL, " "));
-    else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "),0);
-    else if(strcmp(token, "copia") == 0)copia(strtok(NULL, " "));
-    else if(strcmp(token, "lista") == 0)lista(strtok(NULL, " "));
-    else if(strcmp(token, "mostra") == 0)mostra(strtok(NULL, " "));
-    else if(strcmp(token, "apaga") == 0)apaga(strtok(NULL, " "));
-    else if(strcmp(token, "apagadir") == 0){
-        char *path = strtok(NULL, " ");
-        apagadir(path);
-        printf("Apagou %s\n", path);
+    else if(mountedFS){
+        if(strcmp(token, "criadir") == 0)criadir(strtok(NULL, " "));
+        else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "),0);
+        else if(strcmp(token, "copia") == 0)copia(strtok(NULL, " "));
+        else if(strcmp(token, "lista") == 0)lista(strtok(NULL, " "));
+        else if(strcmp(token, "mostra") == 0)mostra(strtok(NULL, " "));
+        else if(strcmp(token, "apaga") == 0)apaga(strtok(NULL, " "));
+        else if(strcmp(token, "apagadir") == 0){
+            char *path = strtok(NULL, " ");
+            apagadir(path);
+            printf("Apagou %s\n", path);
+        }
+        else if(strcmp(token, "status") == 0)status();
+        else if(strcmp(token, "desmonta") == 0)desmonta(strtok(NULL, " "));
+    } else {
+        printf("Não há um arquivo simulado montado. rode 'monta <arquivoSimulado>'");
     }
     free(command);
     return 0;
@@ -483,24 +599,11 @@ int handleCommand(char *command){
 
 
 int main(){
-    BMP = calloc(BITMAP_BYTES, sizeof(uint8_t));
-    FAT = malloc(BLOCK_NUMBER * sizeof(int));
-    // memset(FAT, -1, BLOCK_NUMBER * sizeof(int));
     while(TRUE){
         char *command = promptUser();
         if(strcmp(command, "sai") == 0)
             break;
         handleCommand(command);
     }
-    for(int i = 0; i < 20; i++){
-        printf("%d ", FAT[i]);
-    }
-    printf("\n");
-    for(int i = 0; i < 20; i++){
-        printf("%02x ", BMP[i]);
-    }
-    fclose(FSFile);
-    free(BMP);
-    free(FAT);
     return 0;
 }
