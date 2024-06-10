@@ -237,7 +237,7 @@ void toca(char *fileName, uint32_t size){
     if(fileExists(dest)){
         //atualiza o tempo de acesso
         time_t now = time(NULL);
-        fseek(FSFile, 16,SEEK_CUR);
+        fseek(FSFile, 16, SEEK_CUR);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
     else {
@@ -262,7 +262,17 @@ void copia(char *origem){
     fread(buffer, 1, length, copy);
     fclose(copy);
 
-    if(!fileExists(destino)) toca(destino, length);
+    pathTo(destino, &parent, STOP_BEFORE, DIR);
+    if(!fileExists(parent)){
+        toca(destino, length);
+    }
+    else {
+        printf("ebaa rodei ebaa\n");
+        time_t now = time(NULL);
+        fseek(FSFile, 12, SEEK_CUR);
+        fwrite(&now, sizeof(uint32_t), 1, FSFile);
+        fwrite(&now, sizeof(uint32_t), 1, FSFile);
+    }
     pathTo(destino, &parent, STOP_AT, FIL);
     uint16_t i, curBlock = ftell(FSFile)/BLOCK_SIZE;
     uint64_t written = 0;
