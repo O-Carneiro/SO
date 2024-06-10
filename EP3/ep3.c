@@ -94,7 +94,7 @@ void findEntrySpace(){
     uint16_t curBlock = ftell(FSFile)/4096;
     Entry e;
     while(true){
-        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
             curBlock = nextBlock(curBlock, ALLOC);
         if(!curBlock)// err no space
             return;
@@ -110,7 +110,7 @@ bool fileExists(char *fileName){
     uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     while(true){
-        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
             curBlock = nextBlock(curBlock, NO_ALLOC);
         if(!curBlock){// err no space
             return false;
@@ -164,16 +164,17 @@ void pathTo(char *path, char **parent, bool stoppage,bool mode){
 
     Entry e;
     while(true){
-        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
             curBlock = nextBlock(curBlock, NO_ALLOC);
         if(!curBlock){
+            printf("Next block is Invalid!\n");
             //err dir no exist
             return;
         }
         e = readEntry();
-        printf("e.name: %s\n", e.name);
-        printf("parent: %s\n", *parent);
         if(e.blockPtr == 0){
+            printf("Read empty entry!\n");
+            rewind(FSFile);
             //err dir no exist
             return;
         }
@@ -185,11 +186,10 @@ void pathTo(char *path, char **parent, bool stoppage,bool mode){
                     fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
                 else
                     fseek(FSFile, (e.blockPtr)*BLOCK_SIZE, SEEK_SET);
-                curBlock = e.blockPtr/BLOCK_SIZE;
+                curBlock = ftell(FSFile)/BLOCK_SIZE;
                 *parent = nextDir;
                 nextDir = strtok(NULL, "/");
                 if(nextDir == NULL){
-                    //is one before the end of path, can return
                     return;
                 }
             }
@@ -200,11 +200,10 @@ void pathTo(char *path, char **parent, bool stoppage,bool mode){
                     fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
                 else
                     fseek(FSFile, (e.blockPtr)*BLOCK_SIZE, SEEK_SET);
-                curBlock = e.blockPtr/BLOCK_SIZE;
+                curBlock = ftell(FSFile)/BLOCK_SIZE;
                 *parent = nextDir;
                 nextDir = strtok(NULL, "/");
-                if(parent == NULL){
-                    //is at the end of path, can return
+                if(*parent == NULL){
                     return;
                 }
             }
@@ -228,12 +227,14 @@ void monta(char *path){
 void criadir(char *dirName){
     char *dest = NULL;
     pathTo(dirName, &dest, STOP_BEFORE,DIR);
+    if(ftell(FSFile) == 0) return;
     writeEntry(dest, 0, DIR);
 }
 
 void toca(char *fileName, uint32_t size){
     char *dest = NULL;
     pathTo(fileName, &dest, STOP_BEFORE, DIR);
+    if(ftell(FSFile) == 0) return;
     if(fileExists(dest)){
         //atualiza o tempo de acesso
         time_t now = time(NULL);
@@ -247,6 +248,7 @@ void toca(char *fileName, uint32_t size){
 
 void copia(char *origem){
     char *parent,*destino = strtok(NULL, " ");
+    char path[2048]; strcpy(path, destino);
     FILE *copy = fopen(origem, "rb");
     uint32_t length;
     if(copy == NULL){
@@ -256,32 +258,36 @@ void copia(char *origem){
 
     fseek(copy, 0, SEEK_END);
     length = ftell(copy);
-    printf("length: %d\n", length);
     rewind(copy);
     char *buffer = malloc(length);
     fread(buffer, 1, length, copy);
     fclose(copy);
 
-    pathTo(destino, &parent, STOP_BEFORE, DIR);
+    pathTo(path, &parent, STOP_BEFORE, DIR);
+    if(ftell(FSFile) == 0) return;
     if(!fileExists(parent)){
-        toca(destino, length);
+        strcpy(path, destino);
+        toca(path, length);
     }
     else {
-        printf("ebaa rodei ebaa\n");
         time_t now = time(NULL);
         fseek(FSFile, 12, SEEK_CUR);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
-    pathTo(destino, &parent, STOP_AT, FIL);
+    strcpy(path, destino);
+    pathTo(path, &parent, STOP_AT, FIL);
+    if(ftell(FSFile) == 0) return;
+
     uint16_t i, curBlock = ftell(FSFile)/BLOCK_SIZE;
     uint64_t written = 0;
-
+    
     while(curBlock != 0){
         i = 0;
         char *writeBuf = calloc(BLOCK_SIZE, sizeof(uint8_t));
-        while(written < length && i < 4096)
+        while(written < length && i < 4096){
             writeBuf[i++] = buffer[written++];
+        }
         fwrite(writeBuf, 1, BLOCK_SIZE, FSFile);
         free(writeBuf);
 
@@ -290,7 +296,6 @@ void copia(char *origem){
         else
             break;
     }
-
     free(buffer);
 }
 //PROMPT E LEITURA DO PROMPT
