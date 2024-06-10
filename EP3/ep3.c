@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 //TODOS:
 //GLOBAIS
 int mountedFS = FALSE;
@@ -155,10 +156,12 @@ void writeEntry(char *entryName, uint32_t size, uint8_t ehDir){
 void pathTo(char *path, char **parent, bool stoppage,bool mode){
     uint16_t curBlock = ROOT_BLOCK;
     fseek(FSFile, ROOT_ADDR, SEEK_SET);
+    if(strcmp(path, "/") == 0) return;
     char *nextDir = strtok(path, "/");
     *parent = nextDir;
     nextDir = strtok(NULL, "/");
-    if(nextDir == NULL && stoppage){ // is at root, can return
+    if(nextDir == NULL && stoppage){ 
+        // is at root, can return
         return;
     }
 
@@ -179,36 +182,31 @@ void pathTo(char *path, char **parent, bool stoppage,bool mode){
             return;
         }
         if(strcmp(e.name, *parent) == 0){
-            if(stoppage){
-                if(!(e.blockPtr & DIR_INDICATOR) && mode)
-                    return;//err should be dir but is file
-                if(e.blockPtr & DIR_INDICATOR)
-                    fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
-                else
-                    fseek(FSFile, (e.blockPtr)*BLOCK_SIZE, SEEK_SET);
-                curBlock = ftell(FSFile)/BLOCK_SIZE;
-                *parent = nextDir;
-                nextDir = strtok(NULL, "/");
-                if(nextDir == NULL){
-                    return;
-                }
+            if(!(e.blockPtr & DIR_INDICATOR) && mode)
+                return;//err should be dir but is file
+            if(e.blockPtr & DIR_INDICATOR)
+                fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
+            else
+                fseek(FSFile, (e.blockPtr)*BLOCK_SIZE, SEEK_SET);
+            curBlock = ftell(FSFile)/BLOCK_SIZE;
+            *parent = nextDir;
+            nextDir = strtok(NULL, "/");
+            if(nextDir == NULL && stoppage){
+                return;
             }
-            else {
-                if(!(e.blockPtr & DIR_INDICATOR) && mode)
-                    return;//err should be dir but is file
-                if(e.blockPtr & DIR_INDICATOR)
-                    fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
-                else
-                    fseek(FSFile, (e.blockPtr)*BLOCK_SIZE, SEEK_SET);
-                curBlock = ftell(FSFile)/BLOCK_SIZE;
-                *parent = nextDir;
-                nextDir = strtok(NULL, "/");
-                if(*parent == NULL){
-                    return;
-                }
+            if(*parent == NULL && !stoppage){
+                return;
             }
         }
     }
+}
+
+void printTime(uint32_t now){
+    char ret[30];
+    time_t c = (time_t) now;
+    struct tm *tm_struct = localtime(&c);
+    strftime(ret, sizeof(ret), "%d/%m/%Y %H:%M:%S", tm_struct);
+    printf("|%s", ret);
 }
 
 
@@ -270,8 +268,10 @@ void copia(char *origem){
         toca(path, length);
     }
     else {
+        fseek(FSFile, 4,SEEK_CUR);
+        fwrite(&length, sizeof(uint32_t), 1, FSFile);
         time_t now = time(NULL);
-        fseek(FSFile, 12, SEEK_CUR);
+        fseek(FSFile, 4, SEEK_CUR);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
@@ -298,7 +298,31 @@ void copia(char *origem){
     }
     free(buffer);
 }
-//PROMPT E LEITURA DO PROMPT
+
+void lista(char *dirName){
+    char *parent;
+    pathTo(dirName, &parent, STOP_AT, DIR);
+    Entry e;
+    e = readEntry();
+    if(e.blockPtr)
+        printf("|  Tamanho  |       Criado      |     Modificado    |     Acessado      | Nome\n");
+    while(e.blockPtr != 0){
+        bool ehDir = e.blockPtr & DIR_INDICATOR;
+        if(ehDir){
+            printf("|        - B");
+        }
+        else
+            printf("|%9d B", e.size);
+        printTime(e.createTime);
+        printTime(e.modTime);
+        printTime(e.accessTime);
+        printf("| %s", e.name);
+        if(ehDir) printf("/");
+        printf("\n");
+        e = readEntry();
+    }
+}
+//PROMPT E LEITURA DO PROMPT 
 char *promptUser(){
     char *command = (char *)malloc(sizeof(char) * 1024);
     command = readline("{ep3}: ");
@@ -310,7 +334,7 @@ int handleCommand(char *command){
     else if(strcmp(token, "criadir") == 0)criadir(strtok(NULL, " "));
     else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "),0);
     else if(strcmp(token, "copia") == 0)copia(strtok(NULL, " "));
-    // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
+    else if(strcmp(token, "lista") == 0)lista(strtok(NULL, " "));
     // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
     // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
     // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
