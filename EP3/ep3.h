@@ -20,8 +20,19 @@
 #define LAST(k,n) ((k) & ((1<<(n))-1))
 #define DIR 1
 #define FIL 0
-#define DIR_ATTR_SIZE 12
-#define FIL_ATTR_SIZE 14
+#define ENTRY_SIZE 256
+#define ALLOC true
+#define NO_ALLOC false
+
+    
+typedef struct Entry {
+    uint16_t blockPtr; 
+    uint32_t size;
+    uint32_t createTime;
+    uint32_t modTime;
+    uint32_t accessTime;
+    char name[238];
+} Entry;
 
 char *promptUser();
 int handleCommand(char *command);

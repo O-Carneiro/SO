@@ -19,22 +19,15 @@ void loadBMP(){
     }
 }
 
+void loadFAT(){
+}
+
 void setBMP(uint8_t index, bool b){
     uint8_t i = index/8;
     if(b)
         BMP[i] = BMP[i] | 128 >> index%8;
     else
         BMP[i] = BMP[i] & (0xFF - (128 >> index%8));
-    printf("BMP[%d] is now %02x\n", i, BMP[i]);
-}
-
-void loadFAT(){
-    FAT[0] = LAST_BLOCK;
-    for(int i = 1; i < 13; i++){
-        FAT[i] = i+1;
-    }
-    FAT[14] = LAST_BLOCK;
-    FAT[15] = LAST_BLOCK;
 }
 
 void createMountableFile(){
@@ -42,16 +35,19 @@ void createMountableFile(){
     // contando que a fat vai ocupar 13 blocos,
     // e depois, o bloco que contém o root.
     uint8_t *data = calloc(DISK_BYTES, sizeof(uint8_t));
-    data[0] = 0xFF; //11111111
-    data[1] = 0xFE; //11111110
-    //todo: write fat to disk;  
     fwrite(data, sizeof(uint8_t), DISK_BYTES, FSFile);
     free(data);
     rewind(FSFile);
-    loadBMP();
-    loadFAT();
-    //BIG TO DO: ONLY WRITE BMP AND FAT TO 
-    // DISK ONCE UMOUNTING / exiting;
+    //Carrega bitmap inicial
+    BMP[0] = 0xFF;
+    BMP[1] = 0xFE;
+    //carrega FAT inicial
+    FAT[0] = LAST_BLOCK;
+    for(int i = 1; i < 13; i++){
+        FAT[i] = i+1;
+    }
+    FAT[14] = LAST_BLOCK;
+    FAT[15] = LAST_BLOCK;
 }
 uint16_t findFreeBlock(){
     for(int i = 0; i < BLOCK_NUMBER; i++){
@@ -64,134 +60,156 @@ uint16_t findFreeBlock(){
             }
         }
     }
+    //err
     printf("DISCO CHEIO, impossível continuar.");
-    return -1;
+    return 0;
 }
 
-void findEntrySpace(uint16_t size){
-    uint16_t curBlock = ftell(FSFile)/4096;
-    uint16_t blockPtr;
-    while(true){
-        (void)!fread(&blockPtr, 2, 1, FSFile);
-        fseek(FSFile, -2, SEEK_CUR);
-        blockPtr = htons(blockPtr);
-        //se nao ha mais entradas no bloco atual
-        if(blockPtr == 0){
-            //se cabe a entrada nesse bloco
-            if((curBlock +1)*4096 - ftell(FSFile) >= size){
-                return;
-            }
-            else{
-                //se for o ultimo bloco.
-                if(FAT[curBlock] == LAST_BLOCK){
-                        FAT[curBlock] = findFreeBlock();
-                        curBlock = FAT[curBlock];
-                        printf("Now going to block: %d\n", curBlock);
-                        fseek(FSFile, curBlock * BLOCK_SIZE, SEEK_SET);
-                        return;
-                }
-                //se nao for, continua buscando no proximo bloco.
-                else {
-                    curBlock = FAT[curBlock];
-                    fseek(FSFile, curBlock * BLOCK_SIZE, SEEK_SET);
-                    continue;
-                }
-            }
+Entry readEntry(){
+    Entry ret;
+    fread(&ret, ENTRY_SIZE, 1, FSFile);
+    return ret;
+}
+
+int nextBlock(uint16_t curBlock, bool mode){
+    if(FAT[curBlock] == LAST_BLOCK){
+        curBlock = 0;
+        if(mode){
+            FAT[curBlock] = findFreeBlock();
+            curBlock = FAT[curBlock];
+            fseek(FSFile, curBlock * BLOCK_SIZE, SEEK_SET);
         }
-        if(blockPtr & DIR_INDICATOR){
-            blockPtr -= DIR_INDICATOR;
-            fseek(FSFile, DIR_ATTR_SIZE+2, SEEK_CUR);
-        }
-        else
-            fseek(FSFile, FIL_ATTR_SIZE+2, SEEK_CUR);
-        uint8_t c;
-        while((c = fgetc(FSFile)) != '\0'){}
+        return curBlock;
     }
-    
+    else {
+        curBlock = FAT[curBlock];
+        fseek(FSFile, curBlock * BLOCK_SIZE, SEEK_SET);
+        return curBlock;
+    }
 }
 
-void writeEntry(char *entryName, uint8_t ehDir){
+void findEntrySpace(){
+    uint16_t curBlock = ftell(FSFile)/4096;
+    Entry e;
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+            curBlock = nextBlock(curBlock, ALLOC);
+        if(!curBlock)// err no space
+            return;
+        e = readEntry(); 
+        if(e.blockPtr == 0){
+            fseek(FSFile, - ENTRY_SIZE, SEEK_CUR);
+            return;
+        }
+    }
+}
+
+bool fileExists(char *fileName){
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
+    Entry e;
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock){// err no space
+            return false;
+        }
+        e = readEntry(); 
+        if(e.blockPtr == 0){
+            fseek(FSFile, - ENTRY_SIZE, SEEK_CUR);
+            printf("Não existe!\n");
+            return false;
+        }
+        if(strcmp(e.name, fileName) == 0){
+            if(e.blockPtr & DIR_INDICATOR)
+                return false;//err should be file but is dir
+            fseek(FSFile, - ENTRY_SIZE, SEEK_CUR);
+            printf("existe!\n");
+            return true;
+        }
+    }
+}
+void writeEntry(char *entryName, uint32_t size, uint8_t ehDir){
+    findEntrySpace();
     int stringLen = strlen(entryName);
-    //limite de tamanho para o tamanho da entrada caber em 8 bits.
-    if(stringLen > 240){
-        printf("criadir: o nome do diretorio deve ser menor.");
+    if(stringLen > 237){
+        printf("toca: o nome do arquivo deve ser menor.");
         return;
     }
-    uint8_t size = 15 + stringLen;
-    findEntrySpace(size);
-    uint16_t freeBlock = findFreeBlock();
+
+    Entry e;
     time_t now = time(NULL);
-    uint8_t *data = malloc(size);
-    data[0] = LAST((freeBlock + DIR_INDICATOR) >> 8,8);
-    data[1] = LAST(freeBlock,8);
-    for(int j = 0; j < 3; j++){
-        for(int i = 3; i >=0 ; i--){
-            data[5-i+(j*4)] = LAST(now >> i*8, 8);
+    e.blockPtr = findFreeBlock();
+    if(ehDir)
+        e.blockPtr += DIR_INDICATOR;
+    e.size = size;
+    for(int i = 0; i < 238; i++){
+        e.name[i] = '\0';
+    }
+    strcpy(e.name, entryName);
+    e.createTime = now;
+    e.modTime = now;
+    e.accessTime = now;
+    fwrite(&e, ENTRY_SIZE, 1, FSFile);
+}
+
+void pathTo(char *path, char **parent){
+    uint16_t curBlock = ROOT_BLOCK;
+    fseek(FSFile, ROOT_ADDR, SEEK_SET);
+
+    char *nextDir = strtok(path, "/");
+    *parent = path;
+    nextDir = strtok(NULL, "/");
+    if(nextDir == NULL){ // is at root, can return
+        return;
+    }
+
+    Entry e;
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE > curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock){
+            //err dir no exist
+            return;
+        }
+        e = readEntry();
+        if(e.blockPtr == 0){
+            //err dir no exist
+            return;
+        }
+        if(strcmp(e.name, *parent) == 0){
+            if(!(e.blockPtr & DIR_INDICATOR))
+                return;//err should be dir but is file
+            fseek(FSFile, (e.blockPtr - DIR_INDICATOR)*BLOCK_SIZE, SEEK_SET);
+            curBlock = e.blockPtr/BLOCK_SIZE;
+            *parent = nextDir;
+            nextDir = strtok(NULL, "/");
+            if(nextDir == NULL){
+                //is at the end of path, can return
+                return;
+            }
         }
     }
-    fwrite(data, sizeof(uint8_t), size - (stringLen + 1), FSFile);
-    for(int i = 0; i < stringLen; i++){
-        fputc(entryName[i], FSFile);
-    }
-    fputc('\0', FSFile);
-    free(data);
-
 }
 
 
 //COMANDOS DO FS
 void criadir(char *dirName){
-    char *nextDir = strtok(dirName, "/");
-    //começa a busca no ROOT
-    uint16_t curBlock = 14;
-    fseek(FSFile, ROOT_ADDR, SEEK_SET);
-    char *parent = dirName;
-    nextDir = strtok(NULL, "/");
-    //eh filho do ROOT
-    if(nextDir == NULL){
-        writeEntry(parent, DIR);
-        return;
+    char *parent = NULL;
+    pathTo(dirName, &parent);
+    writeEntry(parent, 0, DIR);
+}
+void toca(char *fileName){
+    char *parent = NULL;
+    pathTo(fileName, &parent);
+    if(fileExists(parent)){
+        time_t now = time(NULL);
+        fseek(FSFile, 16,SEEK_CUR);
+        fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
-    //se nao eh filho do root
-    uint16_t blockPtr;
-    while(true){
-        (void)!fread(&blockPtr, 2, 1, FSFile);
-        blockPtr = htons(blockPtr);
-        //se nao ha mais entradas no bloco atual
-        if(blockPtr == 0){
-            //se for o ultimo bloco
-            if(FAT[curBlock] & LAST_BLOCK){
-                return;
-            }
-            else {
-                curBlock = FAT[curBlock];
-                fseek(FSFile, curBlock * BLOCK_SIZE, SEEK_SET);
-                continue;
-            }
-        }
-        if(blockPtr & DIR_INDICATOR){
-            blockPtr -= DIR_INDICATOR;
-            fseek(FSFile, DIR_ATTR_SIZE, SEEK_CUR);
-        }
-        else
-            fseek(FSFile, FIL_ATTR_SIZE, SEEK_CUR);
-        uint8_t i = 0, c;
-        char name[240];
-        while((c = fgetc(FSFile)) != '\0'){
-            name[i++] = c; 
-        }
-        name[i] = c;
-        if(strcmp(name, parent) == 0){
-            fseek(FSFile, blockPtr*BLOCK_SIZE, SEEK_SET);
-            parent = nextDir;
-            nextDir = strtok(NULL, "/");
-            if(nextDir == NULL){
-                writeEntry(parent, DIR);
-                return;
-            }
-        }
+    else {
+        printf("Escrevendo arquivo\n");
+        writeEntry(parent, 0, FIL);
     }
-
 }
 void monta(char *path){
     FSFile = fopen(path, "rb+");
@@ -212,12 +230,9 @@ char *promptUser(){
 }
 int handleCommand(char *command){
     char *token = strtok(command, " ");
-    if(strcmp(token, "monta") == 0){
-        monta(strtok(NULL, " "));
-    }
-    else if(strcmp(token, "criadir") == 0){
-        criadir(strtok(NULL, " "));
-    }
+    if(strcmp(token, "monta") == 0)monta(strtok(NULL, " "));
+    else if(strcmp(token, "criadir") == 0)criadir(strtok(NULL, " "));
+    else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
     free(command);
     return 0;
 }
