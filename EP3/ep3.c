@@ -63,7 +63,7 @@ uint16_t findFreeBlock(){
     }
     //err
     printf("DISCO CHEIO, impossível continuar.");
-    return 0;
+    exit(0);
 }
 
 Entry readEntry(){
@@ -107,23 +107,20 @@ void findEntrySpace(){
     }
 }
 
-bool fileExists(char *fileName){
+bool entryExists(char *fileName){
     uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     while(true){
         if(ftell(FSFile)/BLOCK_SIZE != curBlock)
             curBlock = nextBlock(curBlock, NO_ALLOC);
-        if(!curBlock){// err no space
+        if(!curBlock)// err no space
             return false;
-        }
         e = readEntry(); 
         if(e.blockPtr == 0){
             fseek(FSFile, - ENTRY_SIZE, SEEK_CUR);
             return false;
         }
         if(strcmp(e.name, fileName) == 0){
-            if(e.blockPtr & DIR_INDICATOR)
-                return false;//err should be file but is dir
             fseek(FSFile, - ENTRY_SIZE, SEEK_CUR);
             return true;
         }
@@ -132,7 +129,7 @@ bool fileExists(char *fileName){
 void writeEntry(char *entryName, uint32_t size, uint8_t ehDir){
     findEntrySpace();
     int stringLen = strlen(entryName);
-    if(stringLen > 235){
+    if(stringLen > 234){
         printf("toca: o nome do arquivo deve ser menor.");
         return;
     }
@@ -209,6 +206,45 @@ void printTime(uint32_t now){
     printf("|%s", ret);
 }
 
+void compacta(){
+    uint32_t eraseAddr = ftell(FSFile) - ENTRY_SIZE;
+    uint32_t lastAddr;
+    uint16_t curBlock = ftell(FSFile)/4096;
+    char zeroes[ENTRY_SIZE] = {'\0'};
+    Entry prev, e;
+    e = readEntry();
+    lastAddr = ftell(FSFile)-ENTRY_SIZE;
+    prev = e;
+    while(e.blockPtr != 0){
+        lastAddr = ftell(FSFile)-ENTRY_SIZE;
+        prev = e;
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock){
+            break;
+        }
+        e = readEntry();
+        if(e.blockPtr == 0){
+            break;
+        }
+    }
+    if((lastAddr % BLOCK_SIZE) == 0 && lastAddr != ROOT_ADDR){
+        uint16_t emptyBlock = lastAddr/BLOCK_SIZE;
+        FAT[emptyBlock] = 0;
+        setBMP(emptyBlock, false);
+        uint16_t lastBeforeEmpty = eraseAddr/BLOCK_SIZE;
+        //Equanto o lastBeforeEmpty apontar para uma entrada valida
+        while(FAT[FAT[lastBeforeEmpty]] != 0){
+            lastBeforeEmpty = FAT[lastBeforeEmpty];
+        }
+        FAT[lastBeforeEmpty] = LAST_BLOCK;
+    }
+    fseek(FSFile, lastAddr, SEEK_SET);
+    fwrite(&zeroes, 1, ENTRY_SIZE, FSFile);
+    fseek(FSFile, eraseAddr, SEEK_SET);
+    fwrite(&prev, ENTRY_SIZE, 1, FSFile);
+}
+
 
 //COMANDOS DO FS
 void monta(char *path){
@@ -233,7 +269,7 @@ void toca(char *fileName, uint32_t size){
     char *dest = NULL;
     pathTo(fileName, &dest, STOP_BEFORE, DIR);
     if(ftell(FSFile) == 0) return;
-    if(fileExists(dest)){
+    if(entryExists(dest)){
         //atualiza o tempo de acesso
         time_t now = time(NULL);
         fseek(FSFile, 16, SEEK_CUR);
@@ -263,7 +299,7 @@ void copia(char *origem){
 
     pathTo(path, &parent, STOP_BEFORE, DIR);
     if(ftell(FSFile) == 0) return;
-    if(!fileExists(parent)){
+    if(!entryExists(parent)){
         strcpy(path, destino);
         toca(path, length);
     }
@@ -302,11 +338,17 @@ void copia(char *origem){
 void lista(char *dirName){
     char *parent;
     pathTo(dirName, &parent, STOP_AT, DIR);
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     e = readEntry();
     if(e.blockPtr)
         printf("|  Tamanho  |       Criado      |     Modificado    |     Acessado      | Nome\n");
     while(e.blockPtr != 0){
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock){
+            return;
+        }
         bool ehDir = e.blockPtr & DIR_INDICATOR;
         if(ehDir){
             printf("|        - B");
@@ -322,6 +364,99 @@ void lista(char *dirName){
         e = readEntry();
     }
 }
+
+void mostra(char *fileName){
+    char *parent;
+    pathTo(fileName, &parent, STOP_AT, FIL);
+    if(ftell(FSFile) == 0) return;
+
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
+    while(curBlock != 0){
+        char *writeBuf = malloc(BLOCK_SIZE);
+        memset(writeBuf, 0, BLOCK_SIZE);
+        fread(writeBuf, 1, BLOCK_SIZE, FSFile);
+        printf("%s",writeBuf);
+        free(writeBuf);
+        curBlock = nextBlock(curBlock, NO_ALLOC);
+    }
+}
+void apaga(char *fileName){
+    if(strcmp(fileName, "/") == 0) return;
+    char path[2048]; strcpy(path, fileName);
+    char *parent;
+    uint16_t blocks[BLOCK_NUMBER];
+    pathTo(path, &parent, STOP_BEFORE, DIR);
+    //err arq no exist
+    if(!entryExists(parent)) return;
+
+    uint16_t i = 0, curBlock;
+    Entry e = readEntry();
+    if(e.blockPtr & DIR_INDICATOR) return;
+    curBlock = e.blockPtr;
+    compacta();
+    char *eraseBuf = calloc(BLOCK_SIZE, sizeof(uint8_t));
+    while(curBlock != 0){
+        blocks[i++] = curBlock;
+        curBlock = nextBlock(curBlock, NO_ALLOC);
+    }
+    for(int j = 0; j < i; j++){
+        fseek(FSFile, blocks[j]*BLOCK_SIZE, SEEK_SET);
+        fwrite(eraseBuf, 1, BLOCK_SIZE, FSFile);
+        FAT[blocks[j]] = 0;
+        setBMP(blocks[j], false);
+    }
+    free(eraseBuf);
+}
+
+void apagadir(char *dirName){
+    uint16_t i = 0;
+    while(dirName[i] != '\0'){
+        i++;
+    }
+    if(dirName[i] != '/'){
+        strcat(dirName, "/\0");
+    }
+    char *parent;
+    char path[4096]; strcpy(path, dirName);
+    pathTo(path, &parent, STOP_BEFORE, DIR);
+    if(!entryExists(parent)){printf("Entry %s does not exist\n", path);return;}
+    uint32_t eraseAddr = ftell(FSFile)+ENTRY_SIZE;
+    strcpy(path, dirName);
+    pathTo(path, &parent, STOP_AT, DIR);
+    if(ftell(FSFile) == 0) return;
+    uint16_t curBlock = ftell(FSFile)/4096;
+    Entry e;
+    i = 0;
+    uint32_t lastPos;
+    while(true){
+        e = readEntry();
+        fseek(FSFile, -ENTRY_SIZE, SEEK_CUR);
+        if(e.blockPtr == 0) break;
+        if(e.blockPtr & DIR_INDICATOR){
+            strcpy(path, dirName);
+            strcat(path, e.name);
+            lastPos = ftell(FSFile); 
+            apagadir(path);
+            fseek(FSFile, lastPos, SEEK_SET);
+            printf("Apagou %s\n", path);
+        }
+        else {
+            strcpy(path, dirName);
+            lastPos = ftell(FSFile); 
+            apaga(strcat(path, e.name));
+            fseek(FSFile, lastPos, SEEK_SET);
+            printf("Apagou %s\n", path);
+        }
+    }
+    fseek(FSFile, eraseAddr, SEEK_SET);
+    compacta();
+    char *eraseBuf = calloc(BLOCK_SIZE, sizeof(uint8_t));
+    fseek(FSFile, curBlock*BLOCK_SIZE, SEEK_SET);
+    fwrite(eraseBuf, 1, BLOCK_SIZE, FSFile);
+    FAT[curBlock] = 0;
+    setBMP(curBlock, false);
+    free(eraseBuf);
+}
 //PROMPT E LEITURA DO PROMPT 
 char *promptUser(){
     char *command = (char *)malloc(sizeof(char) * 1024);
@@ -335,9 +470,13 @@ int handleCommand(char *command){
     else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "),0);
     else if(strcmp(token, "copia") == 0)copia(strtok(NULL, " "));
     else if(strcmp(token, "lista") == 0)lista(strtok(NULL, " "));
-    // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
-    // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
-    // else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "));
+    else if(strcmp(token, "mostra") == 0)mostra(strtok(NULL, " "));
+    else if(strcmp(token, "apaga") == 0)apaga(strtok(NULL, " "));
+    else if(strcmp(token, "apagadir") == 0){
+        char *path = strtok(NULL, " ");
+        apagadir(path);
+        printf("Apagou %s\n", path);
+    }
     free(command);
     return 0;
 }
