@@ -23,6 +23,8 @@
 #define ENTRY_SIZE 256
 #define ALLOC true
 #define NO_ALLOC false
+#define STOP_BEFORE true
+#define STOP_AT false
 
     
 typedef struct Entry {

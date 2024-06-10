@@ -4,7 +4,7 @@ CFLAGS := -O3 -Wall
 
 all: clean ep3
 clean:
-	rm -rf *.out ep3 a b
+	rm -rf *.out *.txt ep3 a b
 
 ep3: ep3.c ep3.h
 	${cc} ${CFLAGS} $@.c -lreadline -o $@.out
