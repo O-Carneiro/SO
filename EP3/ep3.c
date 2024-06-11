@@ -201,7 +201,7 @@ void writeEntry(char *entryName, uint32_t size, uint8_t ehDir){
     findEntrySpace();
     int stringLen = strlen(entryName);
     if(stringLen > 234){
-        printf("toca: o nome do arquivo deve ser menor.");
+        printf("O nome do arquivo deve ser menor.");
         return;
     }
 
@@ -394,15 +394,16 @@ void criadir(char *dirName){
 void toca(char *fileName, uint32_t size){
     fileNumber++;
     char *dest = NULL;
-    pathTo(fileName, &dest, STOP_BEFORE, DIR);
+    char path[2048]; strcpy(path,fileName);
+    pathTo(path, &dest, STOP_BEFORE, DIR);
     if(ftell(FSFile) == 0) return;
     if(entryExists(dest)){
-        //atualiza o tempo de acesso
         time_t now = time(NULL);
         fseek(FSFile, 16, SEEK_CUR);
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
     else {
+        pathTo(fileName, &dest, STOP_BEFORE, DIR);
         writeEntry(dest, size, FIL);
     }
 }
@@ -469,27 +470,30 @@ void lista(char *dirName){
     uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
     Entry e;
     e = readEntry();
-    if(e.blockPtr)
-        printf("|  Tamanho  |       Criado      |     Modificado    |     Acessado      | Nome\n");
-    while(e.blockPtr != 0){
-        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
-            curBlock = nextBlock(curBlock, NO_ALLOC);
-        if(!curBlock){
-            return;
+    if(e.blockPtr){
+            printf("|  Tamanho  |       Criado      |     Modificado    |     Acessado      | Nome\n");
+        while(true){
+            if(ftell(FSFile)/BLOCK_SIZE != curBlock){
+                curBlock = nextBlock(curBlock, NO_ALLOC);
+            }
+            if(!curBlock){
+                return;
+            }
+            bool ehDir = e.blockPtr & DIR_INDICATOR;
+            if(ehDir){
+                printf("|        - B");
+            }
+            else
+                printf("|%9d B", e.size);
+            printTime(e.createTime);
+            printTime(e.modTime);
+            printTime(e.accessTime);
+            printf("| %s", e.name);
+            if(ehDir) printf("/");
+            printf("\n");
+            e = readEntry();
+            if(!e.blockPtr) break;
         }
-        bool ehDir = e.blockPtr & DIR_INDICATOR;
-        if(ehDir){
-            printf("|        - B");
-        }
-        else
-            printf("|%9d B", e.size);
-        printTime(e.createTime);
-        printTime(e.modTime);
-        printTime(e.accessTime);
-        printf("| %s", e.name);
-        if(ehDir) printf("/");
-        printf("\n");
-        e = readEntry();
     }
 }
 
@@ -675,7 +679,12 @@ char *promptUser(){
 }
 int handleCommand(char *command){
     char *token = strtok(command, " ");
-    if(strcmp(token, "monta") == 0)monta(strtok(NULL, " "));
+    if(strcmp(token, "monta") == 0){
+        if(mountedFS == false)
+            monta(strtok(NULL, " "));
+        else
+            printf("Desmonte o outro sistema antes.");
+    }
     else if(mountedFS){
         if(strcmp(token, "criadir") == 0)criadir(strtok(NULL, " "));
         else if(strcmp(token, "toca") == 0)toca(strtok(NULL, " "),0);
