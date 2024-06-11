@@ -20,11 +20,11 @@ void setBMP(uint16_t index, bool b){
 }
 
 void load(){
-    fread(FAT, sizeof(uint16_t), BLOCK_NUMBER, FSFile);
-    fread(&dirNumber, sizeof(uint32_t), 1, FSFile);
-    fread(&fileNumber, sizeof(uint32_t), 1, FSFile);
-    fread(&freeSpace, sizeof(uint32_t), 1, FSFile);
-    fread(&wastedSpace, sizeof(uint32_t), 1, FSFile);
+    (void)!fread(FAT, sizeof(uint16_t), BLOCK_NUMBER, FSFile);
+    (void)!fread(&dirNumber, sizeof(uint32_t), 1, FSFile);
+    (void)!fread(&fileNumber, sizeof(uint32_t), 1, FSFile);
+    (void)!fread(&freeSpace, sizeof(uint32_t), 1, FSFile);
+    (void)!fread(&wastedSpace, sizeof(uint32_t), 1, FSFile);
     for(int i = 0; i < BLOCK_NUMBER; i++){
         if(FAT[i] != 0)
             setBMP(i, true);
@@ -82,7 +82,7 @@ uint16_t findFreeBlock(){
 
 Entry readEntry(){
     Entry ret;
-    fread(&ret, ENTRY_SIZE, 1, FSFile);
+    (void)!fread(&ret, ENTRY_SIZE, 1, FSFile);
     return ret;
 }
 
@@ -421,7 +421,7 @@ void copia(char *origem){
     length = ftell(copy);
     rewind(copy);
     char *buffer = malloc(length);
-    fread(buffer, 1, length, copy);
+    (void)!fread(buffer, 1, length, copy);
     fclose(copy);
 
     pathTo(path, &parent, STOP_BEFORE, DIR);
@@ -502,7 +502,7 @@ void mostra(char *fileName){
     while(curBlock != 0){
         char *writeBuf = malloc(BLOCK_SIZE);
         memset(writeBuf, 0, BLOCK_SIZE);
-        fread(writeBuf, 1, BLOCK_SIZE, FSFile);
+        (void)!fread(writeBuf, 1, BLOCK_SIZE, FSFile);
         printf("%s",writeBuf);
         free(writeBuf);
         curBlock = nextBlock(curBlock, NO_ALLOC);
