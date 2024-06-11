@@ -392,7 +392,6 @@ void criadir(char *dirName){
 }
 
 void toca(char *fileName, uint32_t size){
-    fileNumber++;
     char *dest = NULL;
     char path[2048]; strcpy(path,fileName);
     pathTo(path, &dest, STOP_BEFORE, DIR);
@@ -403,6 +402,7 @@ void toca(char *fileName, uint32_t size){
         fwrite(&now, sizeof(uint32_t), 1, FSFile);
     }
     else {
+        fileNumber++;
         pathTo(fileName, &dest, STOP_BEFORE, DIR);
         writeEntry(dest, size, FIL);
     }
