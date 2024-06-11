@@ -29,7 +29,6 @@
 #define INITIAL_WASTED_SPACE 6144
 //espaço desperdiçado no fim da FAT(que tem os metadados no fim) e pelo ROOT vazio
 
-    
 typedef struct Entry {
     uint16_t blockPtr; 
     uint32_t size;
@@ -38,6 +37,11 @@ typedef struct Entry {
     uint32_t accessTime;
     char name[238];
 } Entry;
+
+typedef struct dbEntry {
+    char name[238];
+    char path[1024];
+} dbEntry;
 
 char *promptUser();
 int handleCommand(char *command);

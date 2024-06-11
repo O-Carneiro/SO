@@ -15,6 +15,7 @@ uint32_t wastedSpace = 0;
 FILE *FSFile;
 uint8_t *BMP;
 uint16_t *FAT;
+dbEntry db[BLOCK_NUMBER]; uint16_t dbIndex = 0;
 //FUNCOES MISC
 void setBMP(uint8_t index, bool b){
     uint8_t i = index/8;
@@ -118,14 +119,11 @@ void showFileTreeR(char *path, uint16_t level){
             curBlock = nextBlock(curBlock, NO_ALLOC);
         if(!curBlock)
             return;
-
         e = readEntry(); 
         bool ehdir = e.blockPtr & DIR_INDICATOR;
-
         if(e.blockPtr == 0){
             return;
         }
-
         for(int i = 0; i < level; i++){
             if(i == level -1) printf("  |-- ");
             else if(i == 0) printf("|");
@@ -155,14 +153,10 @@ void showFileTree(char *path, uint16_t level){
             return;
         e = readEntry(); 
         bool ehdir = e.blockPtr & DIR_INDICATOR;
-
         if(e.blockPtr == 0){
             return;
         }
-        for(int i = 0; i < level; i++){
-            if(i == level -1) printf("|-- ");
-            else printf("  |");
-        }
+        printf("|-- ");
         if(ehdir) printf("%s/\n", e.name);
         else printf("%s\n", e.name);
         if(ehdir){
@@ -328,7 +322,56 @@ void compacta(){
     fwrite(&prev, ENTRY_SIZE, 1, FSFile);
 }
 
+void computeLPSArray(char *pat, int M, int *lps) {
+    int length = 0; 
+    int i = 1;
+    lps[0] = 0; 
+    while (i < M) {
+        if (pat[i] == pat[length]) {
+            length++;
+            lps[i] = length;
+            i++;
+        } 
+        else {
+            if (length != 0) {
+                length = lps[length - 1];
+            } 
+            else {
+                lps[i] = 0;
+                i++;
+            }
+        }
+    }
+}
 
+bool isSubstring(char *s1, char *s2) {
+    int M = strlen(s1);
+    int N = strlen(s2);
+    if (M == 0) return true;
+    if(M > N) return false;
+    int lps[M];
+    computeLPSArray(s1, M, lps);
+    int i = 0;
+    int j = 0;
+    while (i < N) {
+        if (s1[j] == s2[i]) {
+            j++;
+            i++;
+        }
+        if (j == M) {
+            return true;
+        } 
+        else if (i < N && s1[j] != s2[i]) { 
+            if (j != 0) {
+                j = lps[j - 1];
+            } else {
+                i = i + 1;
+            }
+        }
+    }
+
+    return false;
+}
 //COMANDOS DO FS
 void monta(char *path){
     mountedFS = true;
@@ -567,6 +610,71 @@ void desmonta(char *file){
     free(FAT);
     mountedFS= false;
 }
+
+void dbPush(dbEntry e){
+    db[dbIndex++] = e;
+}
+void atualizadbR(char *path){
+    uint16_t curBlock = ftell(FSFile)/BLOCK_SIZE;
+    Entry e;
+    uint32_t lastPos;
+    while(true){
+        if(ftell(FSFile)/BLOCK_SIZE != curBlock)
+            curBlock = nextBlock(curBlock, NO_ALLOC);
+        if(!curBlock)
+            return;
+        e = readEntry(); 
+        if(e.blockPtr == 0){
+            return;
+        }
+        bool ehdir = e.blockPtr & DIR_INDICATOR;
+        if(ehdir){
+            char pathAux[1024]; 
+            strcpy(pathAux, path);
+            strcat(pathAux, e.name);
+            strcat(pathAux, "/");
+            dbEntry dbE;
+            strcpy(dbE.name, e.name);
+            strcpy(dbE.path, pathAux);
+            dbPush(dbE);
+            lastPos = ftell(FSFile);
+            fseek(FSFile, (e.blockPtr - DIR_INDICATOR) * BLOCK_SIZE, SEEK_SET);
+            atualizadbR(pathAux);
+            fseek(FSFile, lastPos, SEEK_SET);
+        }
+        else{
+            char pathAux[1024]; 
+            strcpy(pathAux, path);
+            strcat(pathAux, e.name);
+            dbEntry dbE;
+            strcpy(dbE.name, e.name);
+            strcpy(dbE.path, pathAux);
+            dbPush(dbE);
+        }
+    }
+}
+
+void atualizadb(){
+    fseek(FSFile, ROOT_ADDR, SEEK_SET);
+    dbEntry dbZero; 
+    strcpy(dbZero.name, "\0");
+    strcpy(dbZero.path, "\0");
+    for(int i = 0; i < dbIndex; i++){
+        db[i] = dbZero;
+    }
+    dbIndex = 0;
+    atualizadbR("/");
+    for(int i = 0; i < dbIndex; i++){
+        printf("db[%d]: %s , %s\n", i, db[i].name, db[i].path);
+    }
+}
+
+void busca(char * s){
+    for(int i = 0; i < dbIndex; i++){
+        if(isSubstring(s, db[i].name))
+            printf("%s\n", db[i].path);
+    }
+}
 //PROMPT E LEITURA DO PROMPT 
 char *promptUser(){
     char *command = (char *)malloc(sizeof(char) * 1024);
@@ -588,10 +696,12 @@ int handleCommand(char *command){
             apagadir(path);
             printf("Apagou %s\n", path);
         }
+        else if(strcmp(token, "atualizadb") == 0) atualizadb();
+        else if(strcmp(token, "busca") == 0)busca(strtok(NULL, " "));
         else if(strcmp(token, "status") == 0)status();
         else if(strcmp(token, "desmonta") == 0)desmonta(strtok(NULL, " "));
     } else {
-        printf("Não há um arquivo simulado montado. rode 'monta <arquivoSimulado>'");
+        printf("Não há um arquivo simulado montado. rode 'monta <arquivoSimulado>'\n");
     }
     free(command);
     return 0;
