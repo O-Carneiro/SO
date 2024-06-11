@@ -11,10 +11,10 @@ uint8_t *BMP;
 uint16_t *FAT;
 dbEntry db[BLOCK_NUMBER]; uint16_t dbIndex = 0;
 //FUNCOES MISC
-void setBMP(uint8_t index, bool b){
-    uint8_t i = index/8;
+void setBMP(uint16_t index, bool b){
+    uint16_t i = index/8;
     if(b)
-        BMP[i] = BMP[i] | 128 >> index%8;
+        BMP[i] = BMP[i] | 128 >> index % 8;
     else
         BMP[i] = BMP[i] & (0xFF - (128 >> index%8));
 }
@@ -86,7 +86,7 @@ Entry readEntry(){
     return ret;
 }
 
-int nextBlock(uint16_t curBlock, bool mode){
+uint16_t nextBlock(uint16_t curBlock, bool mode){
     if(FAT[curBlock] == LAST_BLOCK){
         if(mode){
             FAT[curBlock] = findFreeBlock();
@@ -370,7 +370,7 @@ bool isSubstring(char *s1, char *s2) {
 void monta(char *path){
     mountedFS = true;
     BMP = calloc(BITMAP_BYTES, sizeof(uint8_t));
-    FAT = malloc(BLOCK_NUMBER * sizeof(uint16_t));
+    FAT = calloc(BLOCK_NUMBER, sizeof(uint16_t));
     FSFile = fopen(path, "rb+");
     if(FSFile == NULL){
         FSFile = fopen(path, "wb+");
@@ -443,7 +443,7 @@ void copia(char *origem){
     if(ftell(FSFile) == 0) return;
 
     uint16_t i, curBlock = ftell(FSFile)/BLOCK_SIZE;
-    uint64_t written = 0;
+    uint32_t written = 0;
     
     while(curBlock != 0){
         i = 0;
@@ -454,12 +454,14 @@ void copia(char *origem){
         fwrite(writeBuf, 1, BLOCK_SIZE, FSFile);
         free(writeBuf);
 
-        if(written < length)
+        if(written < length){
             curBlock = nextBlock(curBlock, ALLOC);
+            if(wastedSpace == 7296516 ||wastedSpace == 8345344) {int k; scanf("%d", &k);}
+        }
         else
             break;
     }
-    wastedSpace -= written;
+    wastedSpace -= length;
     free(buffer);
 }
 
@@ -588,8 +590,9 @@ void apagadir(char *dirName){
 }
 
 void status(){
-    printf("%d diretorio(s), %d arquivo(s), %d B livres, %d B desperiçados\n",
-           dirNumber, fileNumber, freeSpace, wastedSpace);
+    printf("%lu diretorio(s), %lu arquivo(s), %lu B livres, %lu B desperdiçados\n",
+           (unsigned long)dirNumber, (unsigned long)fileNumber,
+           (unsigned long)freeSpace, (unsigned long)wastedSpace);
 }
 
 void desmonta(char *file){
