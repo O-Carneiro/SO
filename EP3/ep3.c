@@ -454,10 +454,8 @@ void copia(char *origem){
         fwrite(writeBuf, 1, BLOCK_SIZE, FSFile);
         free(writeBuf);
 
-        if(written < length){
+        if(written < length)
             curBlock = nextBlock(curBlock, ALLOC);
-            if(wastedSpace == 7296516 ||wastedSpace == 8345344) {int k; scanf("%d", &k);}
-        }
         else
             break;
     }
