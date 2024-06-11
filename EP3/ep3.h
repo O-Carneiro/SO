@@ -43,6 +43,3 @@ typedef struct dbEntry {
     char path[1024];
 } dbEntry;
 
-char *promptUser();
-int handleCommand(char *command);
-

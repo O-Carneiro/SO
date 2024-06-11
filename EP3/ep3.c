@@ -1,10 +1,4 @@
 #include "ep3.h"
-#include <netinet/in.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
 //TODOS:
 //GLOBAIS
 int mountedFS = FALSE;
@@ -82,7 +76,7 @@ uint16_t findFreeBlock(){
     }
     //err
     printf("DISCO CHEIO, impossível continuar.");
-    exit(0);
+    return 0;
 }
 
 
@@ -664,9 +658,6 @@ void atualizadb(){
     }
     dbIndex = 0;
     atualizadbR("/");
-    for(int i = 0; i < dbIndex; i++){
-        printf("db[%d]: %s , %s\n", i, db[i].name, db[i].path);
-    }
 }
 
 void busca(char * s){
